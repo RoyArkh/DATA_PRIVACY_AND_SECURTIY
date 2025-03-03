@@ -1,0 +1,11 @@
+age,workclass,education,marital-status,occupation,relationship,gender,native-country,income
+"[0,50)",Privy-small-business,Secondary,Committed-relationship,Any,Any,Male,USA,"(12.5K, 25K]"
+"[0,50)",Privy-small-business,Any,Married-civ-spouse,Any,In-family,Male,USA,"(12.5K, 25K]"
+"[0,50)",Government,Post-secondary,Married-civ-spouse,Any,In-family,Male,USA,"(75K, 87.5K]"
+"[0,50)",Privy-small-business,Any,Married-civ-spouse,Any,In-family,Male,USA,"(75K, 87.5K]"
+"[0,50)",Privy-small-business,Secondary,Committed-relationship,Any,Any,Male,USA,"[0, 12.5K]"
+Any,Any,Post-secondary,Any,Any,Any,Any,USA,above 87.5k
+Any,Any,Post-secondary,Any,Any,Any,Any,USA,"[0, 12.5K]"
+"[50,100)",Private,Without-Post-Secondary,Married-civ-spouse,Blue-collar,In-family,Male,USA,"(25K, 37.5K]"
+"[50,100)",Private,Without-Post-Secondary,Married-civ-spouse,Blue-collar,In-family,Male,USA,"(75K, 87.5K]"
+"[0,50)",Government,Post-secondary,Married-civ-spouse,Any,In-family,Male,USA,"(37.5K, 50K]"

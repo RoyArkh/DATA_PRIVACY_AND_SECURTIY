@@ -1,0 +1,933 @@
+def get_qi_attributes(dataset):
+    """
+    Get quasi-identifier attributes from the dataset.
+    
+    Args:
+        dataset (list): The input dataset
+    
+    Returns:
+        list: Quasi-identifier attributes
+    """
+    # Exclude 'income' and 'index' from QI attributes
+    return [attr for attr in dataset[0].keys() if attr not in ['income', 'index']]
+
+def get_qi_values(record, qi_attributes):
+    """
+    Extract QI values for a record.
+    
+    Args:
+        record (dict): A single record
+        qi_attributes (list): List of quasi-identifier attributes
+    
+    Returns:
+        tuple: Values of QI attributes
+    """
+    return tuple(record[attr] for attr in qi_attributes)
+
+def generalize_value(value, hierarchy, current_level=None):
+    """
+    Generalize a value to a more generic level in the hierarchy.
+    
+    Args:
+        value (str): The value to generalize
+        hierarchy (dict): The hierarchy for the attribute
+        current_level (str, optional): Current level in the hierarchy
+    
+    Returns:
+        str: Generalized value
+    """
+    def find_value_path(tree, target):
+        """Find the path to a value in the hierarchy."""
+        if not tree:
+            return None
+        
+        for key, subtree in tree.items():
+            if key == target:
+                return [key]
+            
+            sub_path = find_value_path(subtree, target)
+            if sub_path:
+                return [key] + sub_path
+        
+        return None
+
+    # If value is already 'Any', return 'Any'
+    if value == 'Any':
+        return 'Any'
+    
+    # Find the full path of the value in the hierarchy
+    path = find_value_path(hierarchy, value)
+    
+    # If no path found, return original value
+    if not path:
+        return value
+    
+    # If current_level is None, go to the first parent
+    if current_level is None:
+        return path[0] if len(path) > 1 else value
+    
+    # Find current position of the current_level in the path
+    try:
+        current_index = path.index(current_level)
+        # Return parent if exists
+        return path[current_index + 1] if current_index + 1 < len(path) else current_level
+    except ValueError:
+        # If current_level not in path, return first parent
+        return path[0] if len(path) > 1 else value
+
+def create_equivalence_classes(shuffled_dataset, k, DGHs):
+    """
+    Create equivalence classes ensuring k-anonymity.
+    
+    Args:
+        shuffled_dataset (list): Shuffled dataset
+        k (int): k-anonymity parameter
+        DGHs (dict): Domain Generalization Hierarchies
+    
+    Returns:
+        list: Anonymized equivalence classes
+    """
+    # Get QI attributes
+    qi_attributes = get_qi_attributes(shuffled_dataset)
+    
+    # Create equivalence classes
+    clusters = []
+    for i in range(0, len(shuffled_dataset), k):
+        # Take next k records (or remaining records if less than k)
+        ec_records = shuffled_dataset[i:i+k]
+        
+        # Generalize records to make them k-anonymous
+        anonymized_ec = generalize_equivalence_class(ec_records, qi_attributes, DGHs, k)
+        
+        clusters.append(anonymized_ec)
+    
+    return clusters
+
+def generalize_equivalence_class(ec_records, qi_attributes, DGHs, k):
+    """
+    Generalize an equivalence class to achieve k-anonymity.
+    
+    Args:
+        ec_records (list): Records in the equivalence class
+        qi_attributes (list): Quasi-identifier attributes
+        DGHs (dict): Domain Generalization Hierarchies
+        k (int): k-anonymity parameter
+    
+    Returns:
+        list: Anonymized records in the equivalence class
+    """
+    # Make a deep copy to avoid modifying original records
+    ec_records = copy.deepcopy(ec_records)
+    
+    # If we already have k or fewer records, no need to generalize
+    if len(ec_records) <= k:
+        return ec_records
+    
+    # Try to achieve k-anonymity through generalization
+    generalization_levels = {attr: None for attr in qi_attributes}
+    
+    # Keep track of current equivalence class
+    while not is_k_anonymous(ec_records, qi_attributes, k):
+        # Find the attribute that minimizes information loss when generalized
+        best_attr = find_best_generalization_attribute(
+            ec_records, qi_attributes, DGHs, generalization_levels
+        )
+        
+        # Generalize all records for this attribute
+        for record in ec_records:
+            record[best_attr] = generalize_value(
+                record[best_attr], 
+                DGHs[best_attr], 
+                generalization_levels[best_attr]
+            )
+        
+        # Update generalization level for this attribute
+        generalization_levels[best_attr] = (
+            generalization_levels[best_attr] or 
+            list(DGHs[best_attr].keys())[0]
+        )
+    
+    return ec_records
+
+def is_k_anonymous(records, qi_attributes, k):
+    """
+    Check if the records form a k-anonymous group.
+    
+    Args:
+        records (list): Records to check
+        qi_attributes (list): Quasi-identifier attributes
+        k (int): k-anonymity parameter
+    
+    Returns:
+        bool: True if k-anonymous, False otherwise
+    """
+    # Group records by their QI values
+    qi_groups = {}
+    for record in records:
+        qi_values = get_qi_values(record, qi_attributes)
+        if qi_values not in qi_groups:
+            qi_groups[qi_values] = []
+        qi_groups[qi_values].append(record)
+    
+    # Check if all groups have at least k records
+    return all(len(group) >= k for group in qi_groups.values())
+
+def find_best_generalization_attribute(
+    records, qi_attributes, DGHs, current_levels
+):
+    """
+    Find the attribute that minimizes information loss when generalized.
+    
+    Args:
+        records (list): Records to generalize
+        qi_attributes (list): Quasi-identifier attributes
+        DGHs (dict): Domain Generalization Hierarchies
+        current_levels (dict): Current generalization levels
+    
+    Returns:
+        str: Attribute to generalize
+    """
+    # Candidate attributes are those not fully generalized
+    candidate_attrs = [
+        attr for attr in qi_attributes 
+        if current_levels[attr] is None
+    ]
+    
+    # If no candidates, choose an attribute with the least current generalization
+    if not candidate_attrs:
+        candidate_attrs = qi_attributes
+    
+    # Choose attribute with the least information loss
+    return min(candidate_attrs, key=lambda attr: 
+        estimate_information_loss(records, attr, DGHs, current_levels)
+    )
+
+def estimate_information_loss(records, attr, DGHs, current_levels):
+    """
+    Estimate information loss for generalizing an attribute.
+    
+    Args:
+        records (list): Records to generalize
+        attr (str): Attribute to generalize
+        DGHs (dict): Domain Generalization Hierarchies
+        current_levels (dict): Current generalization levels
+    
+    Returns:
+        float: Estimated information loss
+    """
+    # Number of unique values before and after generalization
+    current_unique_values = set(record[attr] for record in records)
+    
+    # Simulate generalization
+    generalized_values = set()
+    for record in records:
+        generalized_value = generalize_value(
+            record[attr], 
+            DGHs[attr], 
+            current_levels[attr]
+        )
+        generalized_values.add(generalized_value)
+    
+    # Information loss is the reduction in unique values
+    return len(current_unique_values) - len(generalized_values)
+
+def random_anonymizer(raw_dataset_file: str, DGH_folder: str, k: int,
+                      s: int, output_file: str):
+    """
+    K-anonymization of a dataset using a randomized algorithm.
+    
+    Args:
+        raw_dataset_file (str): Path to the raw dataset file
+        DGH_folder (str): Path to the DGH directory
+        k (int): k-anonymity parameter
+        s (int): Seed for randomization
+        output_file (str): Path to the output dataset file
+    """
+    # Read dataset and DGHs
+    raw_dataset = read_dataset(raw_dataset_file)
+    DGHs = read_DGHs(DGH_folder)
+    
+    # Add index to track original positions
+    for i in range(len(raw_dataset)):
+        raw_dataset[i]['index'] = i
+    
+    raw_dataset = np.array(raw_dataset)
+    np.random.seed(s)  # Ensure consistency between runs
+    np.random.shuffle(raw_dataset)  # Shuffle the dataset
+    
+    # Create equivalence classes
+    clusters = create_equivalence_classes(raw_dataset, k, DGHs)
+    
+    # Restructure dataset according to original indexes
+    anonymized_dataset = [None] * len(raw_dataset)
+    for cluster in clusters:
+        for item in cluster:
+            anonymized_dataset[item['index']] = item
+            del item['index']
+    
+    # Write anonymized dataset
+    write_dataset(anonymized_dataset, output_file)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+----------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+from collections import defaultdict
+from itertools import product
+
+def get_initial_generalization_levels(DGHs):
+    """Get the maximum height for each attribute's DGH."""
+    def get_dgh_height(hierarchy, current_height=0):
+        if not hierarchy:
+            return current_height
+        return max(get_dgh_height(child, current_height + 1) for child in hierarchy.values())
+    
+    return {attr: get_dgh_height(dgh) for attr, dgh in DGHs.items()}
+
+def get_value_at_level(DGHs, attribute, value, target_level):
+    """Get the generalized value at a specific level in the DGH."""
+    def find_path_to_value(hierarchy, target, path=None):
+        if path is None:
+            path = []
+        for key, sub_hierarchy in hierarchy.items():
+            if key == target:
+                return path + [key]
+            if isinstance(sub_hierarchy, dict):
+                result = find_path_to_value(sub_hierarchy, target, path + [key])
+                if result:
+                    return result
+        return None
+
+    path = find_path_to_value(DGHs[attribute], value)
+    if not path:
+        return value
+    
+    if target_level >= len(path):
+        return path[-1]
+    return path[target_level]
+
+def apply_generalization(record, DGHs, gen_levels):
+    """Apply generalization levels to a record."""
+    generalized = record.copy()
+    for attr, level in gen_levels.items():
+        if attr in DGHs:
+            generalized[attr] = get_value_at_level(DGHs, attr, record[attr], level)
+    return generalized
+
+def check_k_anonymity(dataset, k, quasi_identifiers):
+    """Check if dataset satisfies k-anonymity."""
+    # Group records by QI values
+    groups = defaultdict(list)
+    for record in dataset:
+        qi_values = tuple(record[attr] for attr in quasi_identifiers)
+        groups[qi_values].append(record)
+    
+    # Check if all groups have at least k records
+    return all(len(group) >= k for group in groups.values())
+
+def check_distinct_l_diversity(dataset, l, quasi_identifiers, sensitive_attr='income'):
+    """Check if dataset satisfies distinct l-diversity."""
+    # Group records by QI values
+    groups = defaultdict(list)
+    for record in dataset:
+        qi_values = tuple(record[attr] for attr in quasi_identifiers)
+        groups[qi_values].append(record)
+    
+    # Check if all groups have at least l distinct sensitive values
+    for group in groups.values():
+        distinct_values = len(set(record[sensitive_attr] for record in group))
+        if distinct_values < l:
+            return False
+    
+    return True
+
+def calculate_lm_cost_for_generalization(dataset, DGHs, gen_levels):
+    """Calculate LM cost for a specific generalization."""
+    anonymized = [apply_generalization(record, DGHs, gen_levels) for record in dataset]
+    
+    quasi_identifiers = list(DGHs.keys())
+    total_cost = 0
+    num_qi_attrs = len(quasi_identifiers)
+    attr_weights = {attr: 1/num_qi_attrs for attr in quasi_identifiers}
+    
+    for record in anonymized:
+        record_cost = 0
+        for attr in quasi_identifiers:
+            lm_value = calculate_lm_for_value(DGHs[attr], record[attr])
+            record_cost += attr_weights[attr] * lm_value
+        total_cost += record_cost
+    
+    return total_cost / len(dataset)
+
+def get_next_level_combinations(current_levels, max_levels):
+    """Generate all possible next level combinations by incrementing one attribute."""
+    next_combinations = []
+    for attr in current_levels.keys():
+        if current_levels[attr] < max_levels[attr]:
+            new_levels = current_levels.copy()
+            new_levels[attr] += 1
+            next_combinations.append(new_levels)
+    return next_combinations
+
+def bottom_up_anonymizer(raw_dataset_file: str, DGH_folder: str, k: int, l: int, output_file: str):
+    """Bottom up-based anonymization of a dataset, given a set of DGHs."""
+    raw_dataset = read_dataset(raw_dataset_file)
+    DGHs = read_DGHs(DGH_folder)
+    
+    # Get maximum generalization levels for each attribute
+    max_levels = get_initial_generalization_levels(DGHs)
+    
+    # Start with bottom-most level (all zeros)
+    current_levels = {attr: 0 for attr in DGHs.keys()}
+    quasi_identifiers = list(DGHs.keys())
+    
+    while True:
+        # Get all nodes at current level
+        level_nodes = [current_levels]
+        valid_nodes = []
+        
+        # Check each node at current level
+        for node in level_nodes:
+            # Apply generalization
+            anonymized = [apply_generalization(record, DGHs, node) for record in raw_dataset]
+            
+            # Check k-anonymity and l-diversity
+            if (check_k_anonymity(anonymized, k, quasi_identifiers) and 
+                check_distinct_l_diversity(anonymized, l, quasi_identifiers)):
+                valid_nodes.append((node, calculate_lm_cost_for_generalization(raw_dataset, DGHs, node)))
+        
+        # If we found valid nodes, pick the one with lowest LM cost
+        if valid_nodes:
+            best_node = min(valid_nodes, key=lambda x: x[1])[0]
+            anonymized_dataset = [apply_generalization(record, DGHs, best_node) for record in raw_dataset]
+            break
+        
+        # Move to next level
+        next_level_nodes = get_next_level_combinations(current_levels, max_levels)
+        if not next_level_nodes:
+            # No more levels to explore and no solution found
+            raise Exception("No solution found that satisfies both k-anonymity and l-diversity")
+        
+        # Pick the first combination for next level (since we'll generate all combinations at that level)
+        current_levels = next_level_nodes[0]
+    
+    write_dataset(anonymized_dataset, output_file)
+
+
+
+
+=-------------------------------------------------------
+
+
+
+
+
+def get_all_generalizations(record, DGHs):
+    generalizations = [{}]
+    for attr, dgh in DGHs.items():
+        if attr == 'income':
+            continue
+            
+        def get_ancestors(dgh, value, path=None):
+            if path is None:
+                path = []
+            for key, sub_dgh in dgh.items():
+                if key == value:
+                    return path + [key]
+                if isinstance(sub_dgh, dict):
+                    result = get_ancestors(sub_dgh, value, path + [key])
+                    if result:
+                        return result
+            return None
+            
+        ancestors = get_ancestors(dgh, record[attr])
+        if not ancestors:
+            continue
+            
+        new_generalizations = []
+        for gen in generalizations:
+            for ancestor in ancestors:
+                new_gen = gen.copy()
+                new_gen[attr] = ancestor
+                new_generalizations.append(new_gen)
+        generalizations.extend(new_generalizations)
+    
+    return generalizations
+
+def get_level(generalization, DGHs):
+    level = 0
+    for attr, value in generalization.items():
+        if attr not in DGHs:
+            continue
+            
+        def get_depth(dgh, target, current_depth=0):
+            for key, sub_dgh in dgh.items():
+                if key == target:
+                    return current_depth
+                if isinstance(sub_dgh, dict):
+                    result = get_depth(sub_dgh, target, current_depth + 1)
+                    if result is not None:
+                        return result
+            return None
+            
+        level += get_depth(DGHs[attr], value, 0) or 0
+    return level
+
+def apply_generalization(record, generalization):
+    result = record.copy()
+    for attr, value in generalization.items():
+        result[attr] = value
+    return result
+
+def check_k_anonymity(dataset, k, generalization):
+    groups = {}
+    for record in dataset:
+        signature = tuple(generalization.get(attr, record[attr]) 
+                        for attr in generalization.keys())
+        groups[signature] = groups.get(signature, 0) + 1
+    
+    return all(count >= k for count in groups.values())
+
+def check_l_diversity(dataset, l, generalization):
+    groups = {}
+    for record in dataset:
+        signature = tuple(generalization.get(attr, record[attr]) 
+                        for attr in generalization.keys())
+        
+        if signature not in groups:
+            groups[signature] = set()
+        groups[signature].add(record['income'])
+    
+    return all(len(sensitive_values) >= l 
+              for sensitive_values in groups.values())
+
+def calculate_lm_cost(dataset, generalization, DGHs):
+    total_cost = 0
+    quasi_identifiers = [attr for attr in generalization.keys() if attr in DGHs]
+    num_qi_attrs = len(quasi_identifiers)
+    
+    if num_qi_attrs == 0:
+        return float('inf')
+        
+    attr_weights = {attr: 1/num_qi_attrs for attr in quasi_identifiers}
+    
+    for record in dataset:
+        record_cost = 0
+        for attr in quasi_identifiers:
+            def calculate_lm_value(hierarchy, value):
+                def count_leaves(tree, value):
+                    def _find_subtree(tree, target):
+                        if target in tree:
+                            return tree[target]
+                        for child in tree.values():
+                            if isinstance(child, dict):
+                                result = _find_subtree(child, target)
+                                if result is not None:
+                                    return result
+                        return None
+                    
+                    def _count_leaves(subtree):
+                        if not subtree:
+                            return 1
+                        return sum(_count_leaves(child) for child in subtree.values())
+                    
+                    subtree = _find_subtree(tree, value)
+                    if subtree is None:
+                        return 1
+                    return _count_leaves(subtree)
+                
+                total_leaves = count_leaves(hierarchy, list(hierarchy.keys())[0])
+                value_leaves = count_leaves(hierarchy, value)
+                
+                if total_leaves <= 1:
+                    return 0
+                return (value_leaves - 1) / (total_leaves - 1)
+            
+            gen_value = generalization.get(attr, record[attr])
+            lm_value = calculate_lm_value(DGHs[attr], gen_value)
+            record_cost += attr_weights[attr] * lm_value
+            
+        total_cost += record_cost
+    
+    return total_cost / len(dataset)
+
+def bottom_up_anonymizer(raw_dataset_file: str, DGH_folder: str, k: int, l: int, output_file: str):
+    raw_dataset = read_dataset(raw_dataset_file)
+    DGHs = read_DGHs(DGH_folder)
+
+    all_generalizations = get_all_generalizations(raw_dataset[0], DGHs)
+    level_generalizations = {}
+    for gen in all_generalizations:
+        level = get_level(gen, DGHs)
+        if level not in level_generalizations:
+            level_generalizations[level] = []
+        level_generalizations[level].append(gen)
+    
+    sorted_levels = sorted(level_generalizations.keys())
+
+    best_generalization = None
+    best_cost = float('inf')    
+    for level in sorted_levels:
+        valid_generalizations = []
+        for generalization in level_generalizations[level]:
+            if (check_k_anonymity(raw_dataset, k, generalization) and 
+                check_l_diversity(raw_dataset, l, generalization)):
+                valid_generalizations.append(generalization)
+        if valid_generalizations:
+            for generalization in valid_generalizations:
+                cost = calculate_lm_cost(raw_dataset, generalization, DGHs)
+                if cost < best_cost:
+                    best_cost = cost
+                    best_generalization = generalization
+            break
+    
+    if best_generalization is None:
+        raise ValueError("Could not find a valid generalization")
+    
+    anonymized_dataset = [
+        apply_generalization(record, best_generalization)
+        for record in raw_dataset
+    ]
+    
+    write_dataset(anonymized_dataset, output_file)
+
+
+
+
+
+
+-----------------------------------------------------------------------------
+
+
+
+
+
+
+
+def bottom_up_anonymizer(raw_dataset_file: str, DGH_folder: str, k: int, l: int, output_file: str):
+    """ Bottom-up-based anonymization of a dataset, given a set of DGHs.
+
+    Args:
+        raw_dataset_file (str): the path to the raw dataset file.
+        DGH_folder (str): the path to the DGH directory.
+        k (int): k-anonymity parameter.
+        l (int): distinct l-diversity parameter.
+        output_file (str): the path to the output dataset file.
+    """
+    raw_dataset = read_dataset(raw_dataset_file)
+    DGHs = read_DGHs(DGH_folder)
+    quasi_identifiers = list(DGHs.keys())
+
+    def generalize_record(record, generalization_levels):
+        generalized_record = {}
+        for attr, value in record.items():
+            if attr in generalization_levels:
+                dgh = DGHs[attr]
+                level = generalization_levels[attr]
+                generalized_value = generalize_to_level(dgh, value, level)
+                generalized_record[attr] = generalized_value
+            else:
+                generalized_record[attr] = value
+        return generalized_record
+
+    def generalize_to_level(dgh, value, level):
+        current = value
+        for _ in range(level):
+            current = get_parent(dgh, current)
+            if current is None:
+                return 'Any'
+        return current
+
+    def get_parent(dgh, value):
+        for parent, children in dgh.items():
+            if value in children:
+                return parent
+        return None
+
+    def satisfies_k_anonymity(group):
+        return len(group) >= k
+
+    def satisfies_l_diversity(group):
+        for attr in quasi_identifiers:
+            distinct_values = set(record[attr] for record in group)
+            if len(distinct_values) < l:
+                return False
+        return True
+
+    def group_by_generalization(dataset, generalization_levels):
+        grouped_data = {}
+        for record in dataset:
+            generalized_record = generalize_record(record, generalization_levels)
+            key = tuple(generalized_record[attr] for attr in quasi_identifiers)
+            if key not in grouped_data:
+                grouped_data[key] = []
+            grouped_data[key].append(generalized_record)
+        return grouped_data
+
+    def calculate_lm_cost(generalized_dataset):
+        anonymized_file = "temp_anonymized.csv"
+        write_dataset(generalized_dataset, anonymized_file)
+        return cost_LM(raw_dataset_file, anonymized_file, DGH_folder)
+
+    generalization_levels = {attr: 0 for attr in quasi_identifiers}
+    level_limit = max(len(DGHs[attr]) for attr in quasi_identifiers)
+
+    while max(generalization_levels.values()) <= level_limit:
+        grouped_data = group_by_generalization(raw_dataset, generalization_levels)
+
+        candidates = []
+        for group in grouped_data.values():
+            if satisfies_k_anonymity(group) and satisfies_l_diversity(group):
+                candidates.extend(group)
+
+        if candidates:
+            lm_cost = calculate_lm_cost(candidates)
+            return write_dataset(candidates, output_file)
+
+        for attr in quasi_identifiers:
+            generalization_levels[attr] += 1
+
+    raise ValueError("Could not satisfy k-anonymity and l-diversity with available generalization levels.")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+------------------------------------
+
+
+def find_common_generalization(DGHs, r1, r2):
+    common_values = {}
+    
+    for attr in r1.keys():
+        if attr == 'income' or attr not in DGHs:
+            continue
+            
+        def find_common_ancestor(dgh, val1, val2):
+            def get_path(dgh, target, path=None):
+                if path is None:
+                    path = []
+                for key, sub_dgh in dgh.items():
+                    if key == target:
+                        return path + [key]
+                    if isinstance(sub_dgh, dict):
+                        result = get_path(sub_dgh, target, path + [key])
+                        if result:
+                            return result
+                return None
+
+            path1 = get_path(dgh, val1)
+            path2 = get_path(dgh, val2)
+            
+            if not path1 or not path2:
+                return None
+                
+            for i in range(min(len(path1), len(path2))):
+                if path1[i] != path2[i]:
+                    return path1[i-1] if i > 0 else path1[i]
+            return path1[min(len(path1), len(path2)) - 1]
+            
+        common_values[attr] = find_common_ancestor(DGHs[attr], r1[attr], r2[attr])
+    
+    return common_values
+
+def calculate_max_md_cost(DGHs):
+    max_cost = 0
+    for dgh in DGHs.values():
+        def get_max_depth(hierarchy):
+            if not hierarchy:
+                return 0
+            return 1 + max(get_max_depth(sub) for sub in hierarchy.values())
+        max_cost += get_max_depth(dgh)
+    return max_cost
+
+def calculate_pairwise_distance(DGHs, r1, r2):
+    common_gen = find_common_generalization(DGHs, r1, r2)
+    
+    hypo_raw = [r1, r2]
+    hypo_anon = [
+        {**r1, **common_gen},
+        {**r2, **common_gen}
+    ]
+    
+    quasi_identifiers = [attr for attr in r1.keys() if attr != 'income' and attr in DGHs]
+    num_qi_attrs = len(quasi_identifiers)
+    attr_weights = {attr: 1/num_qi_attrs for attr in quasi_identifiers}
+    
+    lm_dist = 0
+    for attr in quasi_identifiers:
+        if attr in common_gen:
+            lm_value = calculate_lm_for_value(DGHs[attr], common_gen[attr])
+            lm_dist += attr_weights[attr] * lm_value
+    
+    md_dist = 0
+    max_md = calculate_max_md_cost(DGHs)
+    for attr in quasi_identifiers:
+        if attr in common_gen:
+            md_dist += calculate_distortion(DGHs[attr], r1[attr], common_gen[attr])
+            md_dist += calculate_distortion(DGHs[attr], r2[attr], common_gen[attr])
+    
+    normalized_md_dist = md_dist / (max_md * 2) if max_md > 0 else 0
+    
+    return lm_dist + normalized_md_dist
+
+def find_closest_records(records, used_indices, DGHs):
+    min_dist = float('inf')
+    best_pair = None
+    
+    for i in range(len(records)):
+        if i in used_indices:
+            continue
+        for j in range(i + 1, len(records)):
+            if j in used_indices:
+                continue
+            
+            dist = calculate_pairwise_distance(DGHs, records[i], records[j])
+            if dist < min_dist:
+                min_dist = dist
+                best_pair = (i, j)
+            elif dist == min_dist:
+                if best_pair is None or (i < best_pair[0]) or (i == best_pair[0] and j < best_pair[1]):
+                    best_pair = (i, j)
+    
+    return best_pair
+
+def find_closest_record_to_cluster(records, cluster, unused_indices, DGHs):
+    min_dist = float('inf')
+    best_idx = None
+    
+    cluster_gen = {}
+    for attr in records[0].keys():
+        if attr != 'income' and attr in DGHs:
+            attr_values = [r[attr] for r in cluster]
+            cluster_gen[attr] = find_common_generalization(DGHs, cluster[0], cluster[0])[attr]
+            for r in cluster[1:]:
+                new_gen = find_common_generalization(DGHs, {attr: cluster_gen[attr]}, r)[attr]
+                cluster_gen[attr] = new_gen
+    
+    for i in unused_indices:
+        dist = calculate_pairwise_distance(DGHs, records[i], cluster_gen)
+        if dist < min_dist:
+            min_dist = dist
+            best_idx = i
+        elif dist == min_dist and (best_idx is None or i < best_idx):
+            best_idx = i
+    
+    return best_idx
+
+def clustering_anonymizer(raw_dataset_file: str, DGH_folder: str, k: int, output_file: str):
+    """Clustering-based anonymization of a dataset, given a set of DGHs."""
+    raw_dataset = read_dataset(raw_dataset_file)
+    DGHs = read_DGHs(DGH_folder)
+    
+    used_indices = set()
+    anonymized_dataset = [None] * len(raw_dataset)
+    
+    remainder = len(raw_dataset) % k
+    if remainder > 0:
+        start_idx = len(raw_dataset) - remainder
+        last_complete_cluster_start = start_idx - k
+        cluster = [raw_dataset[i] for i in range(last_complete_cluster_start, start_idx)]
+        
+        for i in range(start_idx, len(raw_dataset)):
+            used_indices.add(i)
+            cluster.append(raw_dataset[i])
+        
+        common_gen = {}
+        for attr in raw_dataset[0].keys():
+            if attr != 'income' and attr in DGHs:
+                common_gen[attr] = cluster[0][attr]
+                for r in cluster[1:]:
+                    new_gen = find_common_generalization(DGHs, {attr: common_gen[attr]}, r)[attr]
+                    common_gen[attr] = new_gen
+        
+        for i, record in enumerate(cluster):
+            idx = last_complete_cluster_start + i
+            anonymized_dataset[idx] = {**record, **common_gen}
+    
+    while len(used_indices) < len(raw_dataset) - remainder:
+        closest_pair = find_closest_records(raw_dataset, used_indices, DGHs)
+        if not closest_pair:
+            break
+            
+        cluster = [raw_dataset[closest_pair[0]], raw_dataset[closest_pair[1]]]
+        used_indices.add(closest_pair[0])
+        used_indices.add(closest_pair[1])
+        
+        while len(cluster) < k:
+            unused_indices = set(range(len(raw_dataset))) - used_indices
+            next_record_idx = find_closest_record_to_cluster(raw_dataset, cluster, unused_indices, DGHs)
+            if next_record_idx is None:
+                break
+                
+            cluster.append(raw_dataset[next_record_idx])
+            used_indices.add(next_record_idx)
+        
+        common_gen = {}
+        for attr in raw_dataset[0].keys():
+            if attr != 'income' and attr in DGHs:
+                common_gen[attr] = cluster[0][attr]
+                for r in cluster[1:]:
+                    new_gen = find_common_generalization(DGHs, {attr: common_gen[attr]}, r)[attr]
+                    common_gen[attr] = new_gen
+        
+        for record in cluster:
+            idx = raw_dataset.index(record)
+            anonymized_dataset[idx] = {**record, **common_gen}
+    
+    write_dataset(anonymized_dataset, output_file)
+
+
+
+
+
+
+
+
+
+
+
+

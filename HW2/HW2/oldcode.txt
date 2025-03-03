@@ -1,0 +1,15 @@
+# pert_counts = [0] * len(DOMAIN)
+    # for i in range(len(perturbed_values)):
+    #     val = 0
+    #     for j in range(len(perturbed_values[i])):
+    #         if perturbed_values[i][j] == 1:
+    #             val = j
+
+    #     pert_counts[val] += 1
+
+
+    # estimate = [0] * len(pert_counts)
+    # for i in range(len(pert_counts)):
+    #     estimate[i] = (pert_counts[i] - (len(perturbed_values) * q)) / (p - q)
+    
+    # return estimate

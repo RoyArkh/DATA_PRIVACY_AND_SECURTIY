@@ -1,0 +1,11 @@
+age,workclass,education,marital-status,occupation,relationship,gender,native-country,income
+Any,Any,Any,Any,Any,Any,Any,Any,"(12.5K, 25K]"
+Any,Any,Any,Any,Any,Any,Any,Any,"(12.5K, 25K]"
+Any,Any,Any,Any,Any,Any,Any,Any,"(75K, 87.5K]"
+Any,Any,Any,Any,Any,Any,Any,Any,"(75K, 87.5K]"
+Any,Any,Any,Any,Any,Any,Any,Any,"[0, 12.5K]"
+Any,Any,Any,Any,Any,Any,Any,Any,above 87.5k
+Any,Any,Any,Any,Any,Any,Any,Any,"[0, 12.5K]"
+Any,Any,Any,Any,Any,Any,Any,Any,"(25K, 37.5K]"
+Any,Any,Any,Any,Any,Any,Any,Any,"(75K, 87.5K]"
+Any,Any,Any,Any,Any,Any,Any,Any,"(37.5K, 50K]"

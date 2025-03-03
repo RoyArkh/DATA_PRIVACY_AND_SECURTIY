@@ -1,0 +1,9 @@
+age,gender,workclass,income
+25,Male,Private,<=50K
+30,Female,Local-gov,<=50K
+35,Male,State-gov,>50K
+40,Female,Private,>50K
+45,Male,Federal-gov,<=50K
+50,Female,Local-gov,>50K
+55,Male,Private,<=50K
+60,Female,State-gov,>50K

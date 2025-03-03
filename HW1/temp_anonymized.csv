@@ -1,0 +1,11 @@
+age,workclass,education,marital-status,occupation,relationship,gender,native-country,income
+25,Privy-small-business,11th,Dating,Machine-op-inspct,In-family,Male,USA,"(12.5K, 25K]"
+38,Privy-small-business,HS-grad,Married-civ-spouse,Farming-fishing,In-family,Male,USA,"(12.5K, 25K]"
+28,Local-gov,Assoc-acdm,Married-civ-spouse,Protective-serv,In-family,Male,USA,"(75K, 87.5K]"
+44,Privy-small-business,College-<1yr,Married-civ-spouse,Machine-op-inspct,In-family,Male,USA,"(75K, 87.5K]"
+34,Privy-small-business,10th,Engaged,Other-service,Not-in-family,Male,USA,"[0, 12.5K]"
+63,Self-emp-not-inc,Prof-school,Married-civ-spouse,Prof-specialty,In-family,Male,USA,above 87.5k
+24,Privy-small-business,College-1yr+,Dating,Other-service,Unmarried,Female,USA,"[0, 12.5K]"
+55,Privy-corporate,7th-8th,Married-civ-spouse,Craft-repair,In-family,Male,USA,"(25K, 37.5K]"
+65,Privy-small-business,HS-grad,Married-civ-spouse,Machine-op-inspct,In-family,Male,USA,"(75K, 87.5K]"
+36,Federal-gov,Bachelors,Married-civ-spouse,Adm-clerical,In-family,Male,USA,"(37.5K, 50K]"
